@@ -57,10 +57,11 @@ export class GoogledriveService {
     accessToken: string,
     page: number,
     limit: number,
+    name?: string,
   ) {
     return new Promise(async (resolve, reject) => {
       try {
-        console.log('Fetching sheet names...');
+        console.log(accessToken);
         const sheetNames = await this.getSheetNames(spreadsheetId, accessToken);
 
         if (!sheetNames.length) {
@@ -98,17 +99,66 @@ export class GoogledriveService {
           res.on('end', () => {
             try {
               const jsonData = JSON.parse(data);
-              console.log('Fetched Spreadsheet Data:', jsonData);
+              if (!jsonData.values || jsonData.values.length === 0) {
+                return resolve({
+                  results: [],
+                  totalPages: 0,
+                  totalResults: 0,
+                  limit: Number(limit),
+                  page: Number(page),
+                });
+              }
 
-              const totalResults = jsonData.values ? jsonData.values.length : 0;
+              const headers = jsonData.values[0];
+              const rows = jsonData.values.slice(1);
+
+              // ✅ Find column indexes
+              const firstNameIndex = headers.findIndex((h: any) =>
+                h.toLowerCase().includes('first_name'),
+              );
+              const lastNameIndex = headers.findIndex((h: any) =>
+                h.toLowerCase().includes('last_name'),
+              );
+
+              if (firstNameIndex === -1 || lastNameIndex === -1) {
+                console.error('❌ First Name or Last Name column not found');
+                return reject(
+                  'First Name or Last Name column not found in the sheet.',
+                );
+              }
+
+              console.log(
+                `✅ First Name Index: ${firstNameIndex}, Last Name Index: ${lastNameIndex}`,
+              );
+
+              let filteredRows = rows;
+              if (name) {
+                const lowerCaseName = name.toLowerCase();
+                filteredRows = rows.filter((row: any, index: number) => {
+                  const firstName = row[firstNameIndex]?.toLowerCase() || '';
+                  const lastName = row[lastNameIndex]?.toLowerCase() || '';
+                  const fullName = `${firstName} ${lastName}`;
+
+                  console.log(
+                    `🔍 Checking row ${index + 1}: ${firstName} ${lastName}`,
+                  );
+
+                  return (
+                    firstName.includes(lowerCaseName) ||
+                    lastName.includes(lowerCaseName) ||
+                    fullName.includes(lowerCaseName)
+                  );
+                });
+              }
+              const totalResults = filteredRows.length;
               const totalPages = Math.ceil(totalResults / limit);
               const startIndex = (page - 1) * limit;
-              const paginatedResults = jsonData.values
-                ? jsonData.values.slice(startIndex, startIndex + limit)
-                : [];
-
+              const paginatedResults = filteredRows.slice(
+                startIndex,
+                startIndex + limit,
+              );
               resolve({
-                results: paginatedResults,
+                results: name ? paginatedResults : paginatedResults.slice(1),
                 totalPages,
                 totalResults,
                 limit: Number(limit),

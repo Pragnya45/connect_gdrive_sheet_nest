@@ -10,12 +10,14 @@ export class GoogledriveController {
     @Headers('Authorization') accessToken: string,
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
+    @Query('name') name?: string,
   ) {
     return this.googleDriveService.fetchSpreadsheetData(
       spreadsheetId,
       accessToken,
       page,
       limit,
+      name,
     );
   }
 }
