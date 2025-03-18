@@ -1,4 +1,12 @@
-import { Controller, Get, Query, Headers, Post, Body } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Query,
+  Headers,
+  Post,
+  Body,
+  Delete,
+} from '@nestjs/common';
 import { GoogledriveService } from './googledrive.service';
 @Controller('googledrive')
 export class GoogledriveController {
@@ -30,6 +38,18 @@ export class GoogledriveController {
       spreadsheetId,
       accessToken,
       patientData,
+    );
+  }
+  @Delete('delete-patient')
+  async deletePatientData(
+    @Query('spreadsheetId') spreadsheetId: string,
+    @Headers('Authorization') accessToken: string,
+    @Body('ids') ids: string[], // Array of patient IDs
+  ) {
+    return this.googleDriveService.deletePatientData(
+      spreadsheetId,
+      accessToken,
+      ids,
     );
   }
 }

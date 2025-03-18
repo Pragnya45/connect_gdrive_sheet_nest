@@ -158,7 +158,7 @@ export class GoogledriveService {
                 startIndex + limit,
               );
               resolve({
-                results: name ? paginatedResults : paginatedResults.slice(1),
+                results: paginatedResults,
                 totalPages,
                 totalResults,
                 limit: Number(limit),
@@ -324,6 +324,187 @@ export class GoogledriveService {
           });
         });
         req.write(JSON.stringify({ values: [rowData] }));
+        req.end();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+  // async clearSheet(
+  //   spreadsheetId: string,
+  //   sheetName: string,
+  //   accessToken: string,
+  // ) {
+  //   return new Promise((resolve, reject) => {
+  //     const options = {
+  //       hostname: 'sheets.googleapis.com',
+  //       path: `/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}!A1:Z1000:clear`,
+  //       method: 'POST',
+  //       headers: {
+  //         Authorization: accessToken,
+  //         'Content-Type': 'application/json',
+  //       },
+  //     };
+
+  //     const req = https.request(options, (res) => {
+  //       res.on('end', () => resolve(true));
+  //     });
+
+  //     req.on('error', (error) => {
+  //       reject(error);
+  //     });
+
+  //     req.end();
+  //   });
+  // }
+  async updateSheetData(
+    spreadsheetId: string,
+    sheetName: string,
+    values: any[][],
+    accessToken: string,
+  ) {
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'sheets.googleapis.com',
+        path: `/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(
+          sheetName,
+        )}!A1:Z1000?valueInputOption=RAW`,
+        method: 'PUT', // ✅ Correctly using PUT to overwrite the sheet
+        headers: {
+          Authorization: accessToken,
+          'Content-Type': 'application/json',
+        },
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+        res.on('end', () => {
+          try {
+            const jsonData = JSON.parse(data);
+            if (jsonData.error) {
+              return reject(jsonData.error);
+            }
+            resolve(true);
+          } catch (error) {
+            reject(error);
+          }
+        });
+      });
+
+      req.on('error', (error) => {
+        reject(error);
+      });
+
+      req.write(
+        JSON.stringify({
+          majorDimension: 'ROWS',
+          values,
+        }),
+      );
+      req.end();
+    });
+  }
+
+  async deletePatientData(
+    spreadsheetId: string,
+    accessToken: string,
+    ids: string[],
+  ) {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const sheetNames = await this.getSheetNames(spreadsheetId, accessToken);
+        if (!sheetNames.length) {
+          return reject('No sheets found in the spreadsheet.');
+        }
+
+        // 🔹 Find the "patients" sheet or fallback to the first sheet
+        let sheetName = sheetNames.find((name) =>
+          name.toLowerCase().includes('patient'),
+        );
+        if (!sheetName) {
+          sheetName = sheetNames[0];
+        }
+
+        console.log('Using Sheet:', sheetName);
+
+        // ✅ Fetch all data from the sheet
+        const options = {
+          hostname: 'sheets.googleapis.com',
+          path: `/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(
+            sheetName,
+          )}!A1:Z1000`,
+          method: 'GET',
+          headers: {
+            Authorization: accessToken,
+          },
+        };
+
+        const req = https.request(options, (res) => {
+          let data = '';
+
+          res.on('data', (chunk) => {
+            data += chunk;
+          });
+
+          res.on('end', async () => {
+            try {
+              const jsonData = JSON.parse(data);
+              if (!jsonData.values || jsonData.values.length === 0) {
+                return reject('No data found in the sheet.');
+              }
+
+              const headers = jsonData.values[0]; // Get headers
+              const rows = jsonData.values.slice(1); // Get row data
+
+              // Get index of 'patientid' column
+              const patientIdIndex = headers.findIndex(
+                (h: any) => h.toLowerCase().trim() === 'patientid',
+              );
+              if (patientIdIndex === -1) {
+                return reject('Patient ID column not found.');
+              }
+
+              // ✅ Filter out rows where patientId is not in the ids array
+              const remainingRows = rows.filter(
+                (row: any) => !ids.includes(row[patientIdIndex]),
+              );
+
+              console.log('Remaining Rows:', remainingRows);
+
+              // ✅ Update the sheet with remaining data
+              const updatedRows = [headers, ...remainingRows];
+              console.log('Updated Rows:', updatedRows);
+              if (updatedRows.length > 1) {
+                await this.updateSheetData(
+                  spreadsheetId,
+                  sheetName,
+                  updatedRows,
+                  accessToken,
+                );
+              } else {
+                // ✅ If only headers remain, write only headers
+                await this.updateSheetData(
+                  spreadsheetId,
+                  sheetName,
+                  [headers],
+                  accessToken,
+                );
+              }
+
+              resolve({ message: 'Selected patients deleted successfully' });
+            } catch (error) {
+              reject(error);
+            }
+          });
+        });
+
+        req.on('error', (error) => {
+          reject(error);
+        });
+
         req.end();
       } catch (error) {
         reject(error);
