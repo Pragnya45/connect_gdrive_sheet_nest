@@ -180,4 +180,154 @@ export class GoogledriveService {
       }
     });
   }
+  async fetchSpreadsheetHeaders(
+    headersPath: string,
+    accessToken: string,
+  ): Promise<string[]> {
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'sheets.googleapis.com',
+        path: headersPath,
+        method: 'GET',
+        headers: {
+          Authorization: accessToken,
+        },
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          try {
+            const jsonData = JSON.parse(data);
+            const headers = jsonData.values ? jsonData.values[0] : [];
+            resolve(headers);
+          } catch (error) {
+            reject(error);
+          }
+        });
+      });
+
+      req.on('error', (error) => {
+        reject(error);
+      });
+
+      req.end();
+    });
+  }
+
+  async addPatientsData(
+    spreadsheetId: string,
+    accessToken: string,
+    patientData: any,
+  ) {
+    console.log('Received request with data:', patientData);
+    return new Promise(async (resolve, reject) => {
+      try {
+        console.log('Fetching sheet names...');
+        const sheetNames = await this.getSheetNames(spreadsheetId, accessToken);
+        if (!sheetNames.length) {
+          console.log(sheetNames);
+          return reject('No sheets found in the spreadsheet.');
+        }
+
+        let sheetName = sheetNames.find((name) =>
+          name.toLowerCase().includes('patient'),
+        );
+        if (!sheetName) sheetName = sheetNames[0];
+
+        const headersPath = `/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}!A1:Z1`;
+        const appendPath = `/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}:append?valueInputOption=RAW`;
+
+        const headers = await this.fetchSpreadsheetHeaders(
+          headersPath,
+          accessToken,
+        );
+        console.log('headers', headers);
+
+        const normalizedPatientData: any = Object.keys(patientData).reduce(
+          (acc, key) => {
+            acc[key.trim().toLowerCase()] = patientData[key]; // Trim + lowercase
+            return acc;
+          },
+          {},
+        );
+        console.log(
+          normalizedPatientData,
+          normalizedPatientData?.['first_name'],
+          normalizedPatientData?.first_name,
+        );
+        // Map headers to values
+        const rowData = headers.map((col) => {
+          const key = col.trim().toLowerCase();
+          console.log(key, normalizedPatientData[key]);
+          // Special case for physician_name (combines first and last names)
+          if (`${key}` === 'physician_name') {
+            return `${patientData.physician_first_name || 'N/A'} ${
+              patientData.physician_last_name || ''
+            }`.trim();
+          }
+
+          return normalizedPatientData.hasOwnProperty(`${key}`)
+            ? normalizedPatientData[`${key}`] || 'N/A'
+            : 'N/A';
+        });
+        console.log(rowData);
+        const options = {
+          hostname: 'sheets.googleapis.com',
+          path: appendPath,
+          method: 'POST',
+          headers: {
+            Authorization: accessToken,
+            'Content-Type': 'application/json',
+          },
+        };
+
+        const req = https.request(options, (res) => {
+          let responseData = '';
+
+          res.on('data', (chunk) => {
+            responseData += chunk;
+          });
+
+          res.on('end', () => {
+            console.log('API Response:', responseData);
+
+            if (res.statusCode === 200 || res.statusCode === 204) {
+              console.log('Data added successfully');
+              resolve({ message: 'Data added successfully' });
+            } else {
+              try {
+                const result = JSON.parse(responseData);
+                console.error('Error from API:', result);
+                reject(result);
+              } catch (error) {
+                console.error('Error parsing response:', error);
+                reject('Error parsing response');
+              }
+            }
+          });
+
+          req.on('error', (error) => {
+            console.error('Request error:', error);
+            reject(error);
+          });
+
+          req.setTimeout(5000, () => {
+            console.error('Request timed out');
+            req.abort();
+            reject('Request timed out');
+          });
+        });
+        req.write(JSON.stringify({ values: [rowData] }));
+        req.end();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
 }

@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Headers } from '@nestjs/common';
+import { Controller, Get, Query, Headers, Post, Body } from '@nestjs/common';
 import { GoogledriveService } from './googledrive.service';
 @Controller('googledrive')
 export class GoogledriveController {
@@ -18,6 +18,18 @@ export class GoogledriveController {
       page,
       limit,
       name,
+    );
+  }
+  @Post('add-patient')
+  async addPatientData(
+    @Query('spreadsheetId') spreadsheetId: string,
+    @Headers('Authorization') accessToken: string,
+    @Body() patientData: any,
+  ) {
+    return await this.googleDriveService.addPatientsData(
+      spreadsheetId,
+      accessToken,
+      patientData,
     );
   }
 }
