@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import * as https from 'https';
 import * as dotenv from 'dotenv';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 dotenv.config();
 
@@ -34,7 +35,7 @@ export class GoogledriveService {
             console.log('Sheets JSON:', jsonData);
 
             // Extract sheet names
-            const sheetNames: string[] = jsonData.sheets.map(
+            const sheetNames: string[] = jsonData?.sheets?.map(
               (sheet: any) => sheet.properties.title,
             );
             resolve(sheetNames);
@@ -55,16 +56,17 @@ export class GoogledriveService {
   async fetchSpreadsheetData(
     spreadsheetId: string,
     accessToken: string,
-    page: number,
-    limit: number,
+    page?: number,
+    limit?: number,
     name?: string,
   ) {
+    console.log('Spreadsheet ID:', spreadsheetId);
     return new Promise(async (resolve, reject) => {
       try {
         console.log(accessToken);
         const sheetNames = await this.getSheetNames(spreadsheetId, accessToken);
 
-        if (!sheetNames.length) {
+        if (!sheetNames?.length) {
           return reject('No sheets found in the spreadsheet.');
         }
 
@@ -150,6 +152,12 @@ export class GoogledriveService {
                   );
                 });
               }
+              if (!page || !limit) {
+                console.log('✅ Returning Non-Paginated Results');
+                return resolve({
+                  results: [headers, ...filteredRows],
+                });
+              }
               const totalResults = filteredRows.length;
               const totalPages = Math.ceil(totalResults / limit);
               const startIndex = (page - 1) * limit;
@@ -180,6 +188,43 @@ export class GoogledriveService {
       }
     });
   }
+  async getPatientById(
+    spreadsheetId: string,
+    patientId: string,
+    accessToken: string,
+  ) {
+    const data: any = await this.fetchSpreadsheetData(
+      spreadsheetId,
+      accessToken,
+    );
+    console.log(data);
+    // Find the header and patient rows
+    const headers = data?.results[0];
+    const rows = data?.results?.slice(1);
+
+    const patientIndex = headers.findIndex(
+      (header: any) => header.toLowerCase() === 'patientid',
+    );
+
+    if (patientIndex === -1) {
+      throw new Error('Patient ID column not found.');
+    }
+
+    const patientRow = rows.find((row: any) => row[patientIndex] === patientId);
+
+    if (!patientRow) {
+      throw new Error('Patient not found.');
+    }
+
+    // Map the row data to a JSON object using headers
+    const patientData = {};
+    headers.forEach((header: any, index: number) => {
+      patientData[header] = patientRow[index] || '';
+    });
+
+    return patientData;
+  }
+
   async fetchSpreadsheetHeaders(
     headersPath: string,
     accessToken: string,
@@ -362,13 +407,14 @@ export class GoogledriveService {
     sheetName: string,
     values: any[][],
     accessToken: string,
+    rowIndex?: number,
   ) {
     return new Promise((resolve, reject) => {
       const options = {
         hostname: 'sheets.googleapis.com',
         path: `/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(
           sheetName,
-        )}!A1:Z1000?valueInputOption=RAW`,
+        )}!A1${rowIndex ? rowIndex : ''}:Z${rowIndex ? rowIndex : 1000}?valueInputOption=RAW`,
         method: 'PUT', // ✅ Correctly using PUT to overwrite the sheet
         headers: {
           Authorization: accessToken,
@@ -405,6 +451,77 @@ export class GoogledriveService {
         }),
       );
       req.end();
+    });
+  }
+  // google-drive.service.ts
+  async updatePatientById(
+    patientId: string,
+    spreadsheetId: string,
+    accessToken: string,
+    patientData: any,
+  ) {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const sheetNames = await this.getSheetNames(spreadsheetId, accessToken);
+
+        let sheetName = sheetNames.find((name) =>
+          name.toLowerCase().includes('patient'),
+        );
+        if (!sheetName) {
+          throw new NotFoundException('Patient sheet not found.');
+        }
+
+        // Fetch all rows from the sheet
+        const sheetData: any = await this.fetchSpreadsheetData(
+          spreadsheetId,
+          accessToken,
+        );
+        if (!sheetData?.results || sheetData?.results?.length === 0) {
+          throw new NotFoundException('No data found in the sheet.');
+        }
+
+        // ✅ Extract headers and rows
+        const headers = sheetData.results[0];
+        const rows = sheetData.results.slice(1);
+
+        // 🔎 Find the index of the "Patient ID" column
+        const patientIndex = headers.findIndex(
+          (h: string) => h.toLowerCase() === 'patientid',
+        );
+        if (patientIndex === -1) {
+          throw new NotFoundException('Patient ID column not found.');
+        }
+
+        // 🔎 Find the row where patientId matches
+        const rowIndex = rows.findIndex(
+          (row: any) => row[patientIndex] === patientId,
+        );
+        if (rowIndex === -1) {
+          throw new NotFoundException('Patient not found.');
+        }
+
+        const updatedRow = headers.map(
+          (headerName: string, colIndex: number) => {
+            // Use the field from patientData if available, otherwise keep the old value
+            return patientData[headerName] !== undefined
+              ? patientData[headerName]
+              : rows[rowIndex][colIndex];
+          },
+        );
+
+        // ✅ Update the row in Google Sheets
+        await this.updateSheetData(
+          spreadsheetId,
+          sheetName,
+          [updatedRow],
+          accessToken,
+          rowIndex + 2, // Corrected row number (rowIndex + 2 to account for header row)
+        );
+        resolve({ message: 'Patient updated successfully.' });
+      } catch (error) {
+        console.error('Error updating patient:', error);
+        reject(error);
+      }
     });
   }
 
@@ -483,6 +600,7 @@ export class GoogledriveService {
                   sheetName,
                   updatedRows,
                   accessToken,
+                  undefined,
                 );
               } else {
                 // ✅ If only headers remain, write only headers
@@ -491,6 +609,7 @@ export class GoogledriveService {
                   sheetName,
                   [headers],
                   accessToken,
+                  undefined,
                 );
               }
 

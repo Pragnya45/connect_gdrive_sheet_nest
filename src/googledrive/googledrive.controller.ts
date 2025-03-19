@@ -6,8 +6,10 @@ import {
   Post,
   Body,
   Delete,
+  Put,
 } from '@nestjs/common';
 import { GoogledriveService } from './googledrive.service';
+
 @Controller('googledrive')
 export class GoogledriveController {
   constructor(private readonly googleDriveService: GoogledriveService) {}
@@ -16,8 +18,8 @@ export class GoogledriveController {
   async getSpreadsheetData(
     @Query('spreadsheetId') spreadsheetId: string,
     @Headers('Authorization') accessToken: string,
-    @Query('page') page: number = 1,
-    @Query('limit') limit: number = 10,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
     @Query('name') name?: string,
   ) {
     return this.googleDriveService.fetchSpreadsheetData(
@@ -28,6 +30,23 @@ export class GoogledriveController {
       name,
     );
   }
+  @Get('get-patient')
+  async getPatientById(
+    @Query('spreadsheetId') spreadsheetId: string,
+    @Query('patientId') patientId: string,
+    @Headers('Authorization') accessToken: string,
+  ) {
+    if (!spreadsheetId || !patientId) {
+      throw new Error('Spreadsheet ID and Patient ID are required.');
+    }
+
+    return await this.googleDriveService.getPatientById(
+      spreadsheetId, // ✅ Corrected parameter order
+      patientId,
+      accessToken,
+    );
+  }
+
   @Post('add-patient')
   async addPatientData(
     @Query('spreadsheetId') spreadsheetId: string,
@@ -40,6 +59,26 @@ export class GoogledriveController {
       patientData,
     );
   }
+  // google-drive.controller.ts
+  @Put('edit-patient')
+  async updatePatient(
+    @Query('spreadsheetId') spreadsheetId: string,
+    @Headers('Authorization') accessToken: string,
+    @Query('patientId') patientId: string,
+    @Body() patientData: any,
+  ) {
+    if (!spreadsheetId || !patientId) {
+      throw new Error('Spreadsheet ID and Patient ID are required.');
+    }
+
+    return await this.googleDriveService.updatePatientById(
+      patientId,
+      spreadsheetId,
+      accessToken,
+      patientData,
+    );
+  }
+
   @Delete('delete-patient')
   async deletePatientData(
     @Query('spreadsheetId') spreadsheetId: string,
