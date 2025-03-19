@@ -7,7 +7,6 @@ dotenv.config();
 
 @Injectable()
 export class GoogledriveService {
-  private API_KEY = process.env.GOOGLE_API_KEY;
   async getSheetNames(
     spreadsheetId: string,
     accessToken: string,
@@ -524,6 +523,50 @@ export class GoogledriveService {
       }
     });
   }
+  // Clear all data from the sheet before updating
+  async clearSheetData(
+    spreadsheetId: string,
+    sheetName: string,
+    accessToken: string,
+  ) {
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'sheets.googleapis.com',
+        path: `/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(
+          sheetName,
+        )}!A1:Z1000:clear`, // ✅ Use the 'clear' endpoint
+        method: 'POST',
+        headers: {
+          Authorization: accessToken,
+          'Content-Type': 'application/json',
+        },
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+        res.on('end', () => {
+          try {
+            const jsonData = JSON.parse(data);
+            if (jsonData.error) {
+              return reject(jsonData.error);
+            }
+            resolve(true);
+          } catch (error) {
+            reject(error);
+          }
+        });
+      });
+
+      req.on('error', (error) => {
+        reject(error);
+      });
+
+      req.end();
+    });
+  }
 
   async deletePatientData(
     spreadsheetId: string,
@@ -584,23 +627,26 @@ export class GoogledriveService {
                 return reject('Patient ID column not found.');
               }
 
-              // ✅ Filter out rows where patientId is not in the ids array
+              // ✅ Filter out rows where patientId is in the ids array
               const remainingRows = rows.filter(
                 (row: any) => !ids.includes(row[patientIdIndex]),
               );
 
               console.log('Remaining Rows:', remainingRows);
 
+              // ✅ Clear the sheet first to remove all old rows
+              await this.clearSheetData(spreadsheetId, sheetName, accessToken);
+
               // ✅ Update the sheet with remaining data
               const updatedRows = [headers, ...remainingRows];
               console.log('Updated Rows:', updatedRows);
+
               if (updatedRows.length > 1) {
                 await this.updateSheetData(
                   spreadsheetId,
                   sheetName,
                   updatedRows,
                   accessToken,
-                  undefined,
                 );
               } else {
                 // ✅ If only headers remain, write only headers
@@ -609,7 +655,6 @@ export class GoogledriveService {
                   sheetName,
                   [headers],
                   accessToken,
-                  undefined,
                 );
               }
 

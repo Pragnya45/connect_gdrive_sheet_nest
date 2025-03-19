@@ -5,7 +5,6 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  console.log('📌 API Key:', process.env.GOOGLE_API_KEY);
   const app = await NestFactory.create(AppModule);
   app.enableCors({
     origin: '*', // Allow React frontend
