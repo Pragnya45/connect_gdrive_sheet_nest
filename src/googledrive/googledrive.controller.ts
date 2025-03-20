@@ -21,12 +21,28 @@ export class GoogledriveController {
     @Query('page') page?: number,
     @Query('limit') limit?: number,
     @Query('name') name?: string,
+    @Query('patientId') patientId?: string,
+    @Query('email') email?: string,
   ) {
     return this.googleDriveService.fetchSpreadsheetData(
       spreadsheetId,
       accessToken,
       page,
       limit,
+      name,
+      patientId,
+      email,
+    );
+  }
+  @Get('get-physician')
+  async fetchPhysiciansheet(
+    @Query('spreadsheetId') spreadsheetId: string,
+    @Headers('Authorization') accessToken: string,
+    @Query('name') name?: string,
+  ) {
+    return this.googleDriveService.fetchPhysiciansheetData(
+      spreadsheetId,
+      accessToken,
       name,
     );
   }
@@ -83,7 +99,7 @@ export class GoogledriveController {
   async deletePatientData(
     @Query('spreadsheetId') spreadsheetId: string,
     @Headers('Authorization') accessToken: string,
-    @Body('ids') ids: string[], // Array of patient IDs
+    @Body('ids') ids: string[],
   ) {
     return this.googleDriveService.deletePatientData(
       spreadsheetId,

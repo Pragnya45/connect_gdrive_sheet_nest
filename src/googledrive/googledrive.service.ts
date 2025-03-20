@@ -58,6 +58,8 @@ export class GoogledriveService {
     page?: number,
     limit?: number,
     name?: string,
+    patientId?: string,
+    email?: string,
   ) {
     console.log('Spreadsheet ID:', spreadsheetId);
     return new Promise(async (resolve, reject) => {
@@ -120,8 +122,19 @@ export class GoogledriveService {
               const lastNameIndex = headers.findIndex((h: any) =>
                 h.toLowerCase().includes('last_name'),
               );
+              const patientIdIndex = headers.findIndex((h: any) =>
+                h.toLowerCase().includes('patientid'),
+              );
+              const emailIndex = headers.findIndex((h: any) =>
+                h.toLowerCase().includes('email'),
+              );
 
-              if (firstNameIndex === -1 || lastNameIndex === -1) {
+              if (
+                firstNameIndex === -1 ||
+                lastNameIndex === -1 ||
+                patientIdIndex === -1 ||
+                emailIndex === -1
+              ) {
                 console.error('❌ First Name or Last Name column not found');
                 return reject(
                   'First Name or Last Name column not found in the sheet.',
@@ -151,6 +164,25 @@ export class GoogledriveService {
                   );
                 });
               }
+              if (patientId) {
+                filteredRows = filteredRows.filter(
+                  (row: any, index: number) => {
+                    const rowPatientId = row[patientIdIndex]?.toString();
+                    return rowPatientId === patientId;
+                  },
+                );
+              }
+
+              // ✅ Filter by email if provided
+              if (email) {
+                const lowerCaseEmail = email.toLowerCase();
+                filteredRows = filteredRows.filter(
+                  (row: any, index: number) => {
+                    const rowEmail = row[emailIndex]?.toLowerCase() || '';
+                    return rowEmail === lowerCaseEmail;
+                  },
+                );
+              }
               if (!page || !limit) {
                 console.log('✅ Returning Non-Paginated Results');
                 return resolve({
@@ -159,11 +191,13 @@ export class GoogledriveService {
               }
               const totalResults = filteredRows.length;
               const totalPages = Math.ceil(totalResults / limit);
+              const reversedRows = [...filteredRows].reverse(); // ✅ Reverse order
               const startIndex = (page - 1) * limit;
-              const paginatedResults = filteredRows.slice(
+              const paginatedResults = reversedRows.slice(
                 startIndex,
                 startIndex + limit,
               );
+
               resolve({
                 results: paginatedResults,
                 totalPages,
@@ -311,9 +345,7 @@ export class GoogledriveService {
           console.log(key, normalizedPatientData[key]);
           // Special case for physician_name (combines first and last names)
           if (`${key}` === 'physician_name') {
-            return `${patientData.physician_first_name || 'N/A'} ${
-              patientData.physician_last_name || ''
-            }`.trim();
+            return `${patientData.physician_name || 'N/A'}`.trim();
           }
 
           return normalizedPatientData.hasOwnProperty(`${key}`)
@@ -659,6 +691,104 @@ export class GoogledriveService {
               }
 
               resolve({ message: 'Selected patients deleted successfully' });
+            } catch (error) {
+              reject(error);
+            }
+          });
+        });
+
+        req.on('error', (error) => {
+          reject(error);
+        });
+
+        req.end();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+  async fetchPhysiciansheetData(
+    spreadsheetId: string,
+    accessToken: string,
+    name?: string,
+  ) {
+    console.log('Spreadsheet ID:', spreadsheetId);
+    return new Promise(async (resolve, reject) => {
+      try {
+        console.log(accessToken);
+        const sheetNames = await this.getSheetNames(spreadsheetId, accessToken);
+
+        if (!sheetNames?.length) {
+          return reject('No sheets found in the spreadsheet.');
+        }
+
+        // 🔹 Find the sheet that contains "patients"
+        let sheetName = sheetNames.find((name) =>
+          name.toLowerCase().includes('physician'),
+        );
+
+        if (!sheetName) {
+          sheetName = sheetNames[0];
+        }
+
+        console.log('Using Sheet:', sheetName);
+
+        const options = {
+          hostname: 'sheets.googleapis.com',
+          path: `/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}!A1:Z1000`, // Use dynamic sheet name
+          method: 'GET',
+          headers: {
+            Authorization: accessToken,
+          },
+        };
+
+        const req = https.request(options, (res) => {
+          let data = '';
+
+          res.on('data', (chunk) => {
+            data += chunk;
+          });
+
+          res.on('end', () => {
+            try {
+              const jsonData = JSON.parse(data);
+              if (!jsonData.values || jsonData.values.length === 0) {
+                return resolve({
+                  results: [],
+                });
+              }
+
+              const headers = jsonData.values[0];
+              const rows = jsonData.values.slice(1);
+
+              // ✅ Find column indexes
+              const firstNameIndex = headers.findIndex((h: any) =>
+                h.toLowerCase().includes('name'),
+              );
+
+              if (firstNameIndex === -1) {
+                console.error('❌ Name column not found');
+                return reject('Name column not found in the sheet.');
+              }
+              console.log(rows);
+              let filteredRows = rows;
+              if (name) {
+                const lowerCaseName = name.toLowerCase();
+                filteredRows = rows.filter((row: any, index: number) => {
+                  const firstName = row[firstNameIndex]?.toLowerCase() || '';
+                  const fullName = `${firstName}`;
+
+                  console.log(`🔍 Checking row ${index + 1}: ${firstName}`);
+
+                  return (
+                    firstName.includes(lowerCaseName) ||
+                    fullName.includes(lowerCaseName)
+                  );
+                });
+              }
+              return resolve({
+                results: [headers, ...filteredRows],
+              });
             } catch (error) {
               reject(error);
             }
